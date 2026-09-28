@@ -20,8 +20,13 @@ import {
   getApplications,
   withdrawApplication,
 } from "../../services/applicationService.js";
+import {
+  fetchMyApplications,
+  withdrawApplication as apiWithdrawApplication,
+} from "../../api/applicationApi.js";
 import { applicationTimeline } from "../../services/activity.js";
 import { Loading, ErrorBanner } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 function fmtDate(at) {
   if (!at) return "—";
@@ -193,7 +198,24 @@ function MyApplications() {
     setLoading(true);
     setError("");
     try {
-      setApplications(await getApplications(user?.id));
+      let list = null;
+      try {
+        const apiApps = await fetchMyApplications();
+        if (Array.isArray(apiApps)) {
+          list = apiApps;
+        }
+      } catch (apiErr) {
+        if (!canUseDemoFallback("my applications", apiErr)) {
+          throw new Error("Unable to load your applications from the backend.", { cause: apiErr });
+        }
+      }
+
+      if (!list) {
+        list = canUseDemoFallback("my applications fallback", "backend applications lookup failed")
+          ? await getApplications(user?.id)
+          : [];
+      }
+      setApplications(list);
     } catch (e) {
       setError(e.message || "Failed to load applications.");
     } finally {
@@ -208,9 +230,16 @@ function MyApplications() {
   }, [user?.id]);
 
   const handleWithdraw = async (appId) => {
-    if (!window.confirm(`Withdraw ${appId}? This removes it from the demo list.`)) return;
+    if (!window.confirm(`Withdraw application ${appId}?`)) return;
     try {
-      await withdrawApplication(user?.id, appId);
+      try {
+        await apiWithdrawApplication(appId);
+      } catch (apiErr) {
+        if (!canUseDemoFallback("application withdrawal", apiErr)) {
+          throw new Error("Withdrawal could not be completed in the backend.", { cause: apiErr });
+        }
+        await withdrawApplication(user?.id, appId);
+      }
       setApplications((prev) => prev.filter((a) => a.id !== appId));
       setSelected(null);
     } catch (e) {

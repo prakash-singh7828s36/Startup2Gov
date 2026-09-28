@@ -12,9 +12,15 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { getGovChallengesByOwner, setChallengeStatus, deleteChallenge } from "../../services/govChallengeService.js";
+import {
+  fetchOwnedGovChallenges,
+  updateGovChallengeStatus,
+  deleteGovChallenge,
+} from "../../api/challengeApi.js";
 import { getApplicationsForGov } from "../../services/applicationService.js";
 import { urgencyLabel } from "../../services/deadlines.js";
 import { Loading, ErrorBanner } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 function GovChallenges() {
   const navigate = useNavigate();
@@ -31,11 +37,26 @@ function GovChallenges() {
     setLoading(true);
     setError("");
     try {
-      const mine = await getGovChallengesByOwner(user?.id);
+      let mine = null;
+      try {
+        const apiOwned = await fetchOwnedGovChallenges();
+        if (Array.isArray(apiOwned)) {
+          mine = apiOwned;
+        }
+      } catch (apiErr) {
+        if (!canUseDemoFallback("gov challenges load", apiErr)) {
+          throw new Error("Unable to load your challenges from the backend.", { cause: apiErr });
+        }
+      }
+
+      if (!mine) {
+        mine = await getGovChallengesByOwner(user?.id);
+      }
+
       setChallenges(mine);
-      const apps = await getApplicationsForGov({
-        ownedChallengeIds: mine.map((c) => c.id),
-      });
+      const apps = canUseDemoFallback("gov challenge app counts fallback", "backend application count lookup failed")
+        ? await getApplicationsForGov({ ownedChallengeIds: mine.map((c) => c.id) })
+        : [];
       const counts = {};
       apps.forEach((a) => {
         counts[a.challengeId] = (counts[a.challengeId] || 0) + 1;
@@ -70,13 +91,24 @@ function GovChallenges() {
 
   const handleToggle = async (c) => {
     setBusyId(c.id);
+    const targetStatus = c.status === "Closed" ? "Open" : "Closed";
     try {
-      const next = await setChallengeStatus(
-        c.id,
-        user?.id,
-        c.status === "Closed" ? "Open" : "Closed"
+      let next = null;
+      try {
+        next = await updateGovChallengeStatus(c.id, targetStatus);
+      } catch (apiErr) {
+        if (!canUseDemoFallback("gov challenge status", apiErr)) {
+          throw new Error("Status update could not be saved in the backend.", { cause: apiErr });
+        }
+        next = await setChallengeStatus(c.id, user?.id, targetStatus);
+      }
+      setChallenges((prev) =>
+        prev.map((x) =>
+          x.id === c.id || Number(x.id) === Number(c.id)
+            ? { ...x, ...(next || {}), status: targetStatus }
+            : x
+        )
       );
-      setChallenges((prev) => prev.map((x) => (Number(x.id) === Number(c.id) ? next : x)));
     } catch (e) {
       setError(e.message || "Failed to update status.");
     } finally {
@@ -88,8 +120,17 @@ function GovChallenges() {
     if (!window.confirm(`Delete "${c.title}"? Startups will no longer see it.`)) return;
     setBusyId(c.id);
     try {
-      await deleteChallenge(c.id, user?.id);
-      setChallenges((prev) => prev.filter((x) => Number(x.id) !== Number(c.id)));
+      try {
+        await deleteGovChallenge(c.id);
+      } catch (apiErr) {
+        if (!canUseDemoFallback("gov challenge delete", apiErr)) {
+          throw new Error("Challenge deletion could not complete in the backend.", { cause: apiErr });
+        }
+        await deleteChallenge(c.id, user?.id);
+      }
+      setChallenges((prev) =>
+        prev.filter((x) => x.id !== c.id && Number(x.id) !== Number(c.id))
+      );
     } catch (e) {
       setError(e.message || "Failed to delete challenge.");
     } finally {

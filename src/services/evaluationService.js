@@ -268,7 +268,7 @@ export function eligibilityCheck(startup, challenge) {
 // EXPERIENCE - 15
 // ---------------------------------------------------------
 
-export function experienceMatch(startup, challenge) {
+export function experienceMatch(startup) {
   const foundedYear = Number(startup?.foundedYear || 0);
 
   if (!foundedYear) {

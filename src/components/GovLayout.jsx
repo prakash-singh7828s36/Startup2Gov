@@ -73,7 +73,7 @@ function GovLayout() {
             Applications
             </NavLink>
           <NavLink
-            to="/gov/evaluation"
+            to="/evaluation"
             className={({ isActive }) => (isActive ? "active" : "")}
           >
             <ClipboardCheck size={20} />

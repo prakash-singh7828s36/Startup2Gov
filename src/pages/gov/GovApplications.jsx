@@ -22,8 +22,13 @@ import {
   getApplicationsForGov,
   updateApplicationStatus,
 } from "../../services/applicationService.js";
+import {
+  fetchGovInbox,
+  reviewApplication as apiReviewApplication,
+} from "../../api/applicationApi.js";
 import { applicationTimeline } from "../../services/activity.js";
 import { Loading, ErrorBanner, Toast } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 function fmtDate(at) {
   if (!at) return "—";
@@ -68,12 +73,20 @@ function ReviewDrawer({ app, challenges, onClose, onSaved }) {
     setErr("");
     setSaving(true);
     try {
-      const next = await updateApplicationStatus({
-        reviewerId: user?.id,
-        applicationId: app.id,
-        status,
-        note,
-      });
+      let next = null;
+      try {
+        next = await apiReviewApplication(app.id, { status, note });
+      } catch (apiErr) {
+        if (!canUseDemoFallback("gov review update", apiErr)) {
+          throw new Error("Review update could not be saved in the backend.", { cause: apiErr });
+        }
+        next = await updateApplicationStatus({
+          reviewerId: user?.id,
+          applicationId: app.id,
+          status,
+          note,
+        });
+      }
       onSaved(next);
     } catch (e) {
       setErr(e.message || "Failed to update status.");
@@ -244,9 +257,25 @@ function GovApplications() {
       ]);
       setMine(owned);
       setChallenges(allChallenges);
-      const apps = await getApplicationsForGov({
-        ownedChallengeIds: owned.map((c) => c.id),
-      });
+      let apps = null;
+      try {
+        const inboxData = await fetchGovInbox({
+          challengeId: challengeFilter !== "All" ? challengeFilter : undefined,
+          status: statusFilter !== "All" ? statusFilter : undefined,
+        });
+        if (Array.isArray(inboxData?.applications)) {
+          apps = inboxData.applications;
+        }
+      } catch (apiErr) {
+        if (!canUseDemoFallback("gov inbox load", apiErr)) {
+          throw new Error("Unable to load the applications inbox from the backend.", { cause: apiErr });
+        }
+      }
+      if (!apps) {
+        apps = await getApplicationsForGov({
+          ownedChallengeIds: owned.map((c) => c.id),
+        });
+      }
       setApplications(apps);
     } catch (e) {
       setError(e.message || "Failed to load applications.");

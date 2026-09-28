@@ -8,7 +8,9 @@ import {
   profileStrength,
   validateDPIIT,
 } from "../../services/startupService.js";
+import { fetchMyProfile, updateMyProfile as apiSaveProfile } from "../../api/profileApi.js";
 import { Loading, ErrorBanner, Toast } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 const STAGES = ["Idea", "MVP", "Early Revenue", "Growth"];
 
@@ -39,17 +41,35 @@ function StartupProfile() {
 
   useEffect(() => {
     let mounted = true;
-    getProfile(user?.id)
-      .then((p) => {
-        if (!mounted) return;
+    (async () => {
+      try {
+        let p = null;
+        try {
+          const res = await fetchMyProfile();
+          if (res?.profile) {
+            p = res.profile;
+          }
+        } catch (apiErr) {
+          if (!canUseDemoFallback("profile load", apiErr)) {
+            throw new Error("Unable to load the profile from the backend.", { cause: apiErr });
+          }
+          p = await getProfile(user?.id);
+        }
+
+        if (!mounted || !p) return;
         setFormData({
+          ...emptyProfile,
           ...p,
           email: p.email || user?.email || "",
           startupName: p.startupName || user?.startupName || "",
         });
-      })
-      .catch((e) => setError(e.message || "Failed to load profile."))
-      .finally(() => mounted && setLoading(false));
+      } catch (e) {
+        if (mounted) setError(e.message || "Failed to load profile.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
     return () => {
       mounted = false;
     };
@@ -113,7 +133,16 @@ function StartupProfile() {
     setError("");
     setSaved("");
     try {
-      const next = await saveProfile(user?.id, formData);
+      let next = null;
+      try {
+        const res = await apiSaveProfile(formData);
+        next = res?.profile || formData;
+      } catch (apiErr) {
+        if (!canUseDemoFallback("profile save", apiErr)) {
+          throw new Error("Profile update could not be saved in the backend.", { cause: apiErr });
+        }
+        next = await saveProfile(user?.id, formData);
+      }
       setFormData(next);
       setSaved("Profile saved! Match scores and eligibility across the app just got sharper.");
     } catch (err) {
