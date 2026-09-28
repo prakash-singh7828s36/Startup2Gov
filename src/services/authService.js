@@ -1,5 +1,6 @@
 import { KEYS, getJSON, setJSON, uid, delay } from "./mockDb.js";
 import { logActivity } from "./activity.js";
+import { DEMO_MODE } from "./demoMode.js";
 
 // MOCK auth only — passwords stored obfuscated, never do this in production.
 // Real implementation should call Supabase Auth and never touch localStorage like this.
@@ -12,6 +13,12 @@ export const ROLES = {
 
 export const GOV_DEMO = { email: "demo@gov.in", password: "password123" };
 export const STARTUP_DEMO = { email: "demo@startup.in", password: "password123" };
+
+function requireDemoMode() {
+  if (!DEMO_MODE) {
+    throw new Error("Demo authentication is disabled. Set VITE_DEMO_MODE=true to enable it.");
+  }
+}
 
 function encode(pw) {
   try {
@@ -70,6 +77,7 @@ export async function signup({
   email,
   password,
 }) {
+  requireDemoMode();
   await delay(300);
   let users = ensureSeedUsers(getJSON(KEYS.users, []));
   const normalized = String(email).trim().toLowerCase();
@@ -109,6 +117,7 @@ export async function signup({
 }
 
 export async function login({ email, password }) {
+  requireDemoMode();
   await delay(300);
   const users = ensureSeedUsers(getJSON(KEYS.users, []));
   const normalized = String(email).trim().toLowerCase();
@@ -131,6 +140,7 @@ export async function logout() {
 }
 
 export async function getSessionUser() {
+  requireDemoMode();
   await delay(100);
   const session = getJSON(KEYS.session, null);
   if (!session?.userId) return null;

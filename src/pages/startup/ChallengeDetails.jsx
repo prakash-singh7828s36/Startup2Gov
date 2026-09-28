@@ -20,12 +20,15 @@ import { formatDistanceToNow, parseISO } from "date-fns";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { getChallengeById, getChallenges } from "../../services/challengeService.js";
 import { getProfile } from "../../services/startupService.js";
+import { fetchChallengeById, fetchChallenges } from "../../api/challengeApi.js";
+import { fetchMyProfile } from "../../api/profileApi.js";
 import { hasApplied } from "../../services/applicationService.js";
 import { getDraft } from "../../services/drafts.js";
 import { getBookmarks, toggleBookmark } from "../../services/bookmarks.js";
 import { matchScore, checkEligibility, rankChallenges } from "../../services/matching.js";
 import { deadlineBadge, formatDate } from "../../services/deadlines.js";
 import { Loading, ErrorBanner } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 function ChallengeDetails() {
   const { id } = useParams();
@@ -46,29 +49,48 @@ function ChallengeDetails() {
       setLoading(true);
       setError("");
       try {
-        const [data, prof, marks, all] = await Promise.all([
-          getChallengeById(id),
-          getProfile(user?.id),
+        let data = null;
+        let prof = null;
+        let all = null;
+
+        try {
+          const [apiData, apiProf, apiList] = await Promise.all([
+            fetchChallengeById(id),
+            user?.id ? fetchMyProfile().catch(() => null) : Promise.resolve(null),
+            fetchChallenges().catch(() => null),
+          ]);
+          if (apiData) data = apiData;
+          if (apiProf?.profile) prof = apiProf.profile;
+          if (apiList?.challenges?.length) all = apiList.challenges;
+        } catch (apiErr) {
+          if (!canUseDemoFallback("challenge details", apiErr)) {
+            throw new Error("Unable to load the challenge details from the backend.", { cause: apiErr });
+          }
+        }
+
+        const [fallbackData, fallbackProf, marks, fallbackAll] = await Promise.all([
+          data ? Promise.resolve(data) : (canUseDemoFallback("challenge details fallback", "backend challenge lookup failed") ? getChallengeById(id) : null),
+          prof ? Promise.resolve(prof) : (user?.id && canUseDemoFallback("profile load fallback", "backend profile lookup failed") ? getProfile(user?.id) : null),
           getBookmarks(user?.id),
-          getChallenges(),
+          all ? Promise.resolve(all) : (canUseDemoFallback("challenge list fallback", "backend challenge list lookup failed") ? getChallenges() : []),
         ]);
         if (!mounted) return;
-        setChallenge(data);
-        setProfile(prof);
+        setChallenge(fallbackData);
+        setProfile(fallbackProf);
         setSaved(marks);
-        if (data) {
+        if (fallbackData) {
           const [applied, dr] = await Promise.all([
-            user?.id ? hasApplied(user.id, data.id) : Promise.resolve(false),
-            user?.id ? getDraft(user.id, data.id) : Promise.resolve(null),
+            user?.id ? hasApplied(user.id, fallbackData.id) : Promise.resolve(false),
+            user?.id ? getDraft(user.id, fallbackData.id) : Promise.resolve(null),
           ]);
           if (!mounted) return;
           setAlreadyApplied(applied);
           setDraft(dr);
-          const ranked = rankChallenges(prof || {}, all).filter(
-            (r) => r.challenge.id !== data.id
+          const ranked = rankChallenges(fallbackProf || {}, fallbackAll).filter(
+            (r) => r.challenge.id !== fallbackData.id
           );
           const sameCat = ranked.filter(
-            (r) => r.challenge.category === data.category
+            (r) => r.challenge.category === fallbackData.category
           );
           setRelated([...sameCat, ...ranked].slice(0, 3).map((r) => r.challenge));
         }

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { challenges } from "../data/challenges.js";
+import { DEMO_MODE } from "../services/demoMode.js";
 
 const STEPS = [
   {
@@ -89,7 +90,7 @@ function Landing() {
           <Link to="/signup" className="landing-cta">
             Get started <ArrowRight size={16} />
           </Link>
-          <Link to="/login" className="landing-ghost" title="Government demo: demo@gov.in / password123">
+          <Link to="/login" className="landing-ghost" title={DEMO_MODE ? "Government demo: demo@gov.in / password123" : "Government sign-in"}>
             Govt login
           </Link>
         </div>
@@ -223,7 +224,8 @@ function Landing() {
       <footer className="landing-footer">
         <span>Startup2Gov · Startup + Government modules · Sample demo data</span>
         <span>
-          <Link to="/login">Sign in</Link> · <Link to="/signup">Sign up</Link> · Govt demo: demo@gov.in / password123
+          <Link to="/login">Sign in</Link> · <Link to="/signup">Sign up</Link>
+          {DEMO_MODE && <> · Govt demo: demo@gov.in / password123</>}
         </span>
       </footer>
     </div>

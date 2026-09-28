@@ -17,6 +17,15 @@ import { getProfile } from "../../services/startupService.js";
 import { submitApplication } from "../../services/applicationService.js";
 import { validateFile, mockUploadDocument } from "../../services/storageService.js";
 import { getDraft, saveDraft } from "../../services/drafts.js";
+import { canUseDemoFallback } from "../../services/demoMode.js";
+import { fetchChallengeById } from "../../api/challengeApi.js";
+import { fetchMyProfile } from "../../api/profileApi.js";
+import {
+  fetchDraft as apiFetchDraft,
+  saveDraft as apiSaveDraft,
+  submitApplication as apiSubmitApplication,
+  uploadDocument as apiUploadDocument,
+} from "../../api/applicationApi.js";
 import { deadlineICS } from "../../services/deadlines.js";
 import { Loading, ErrorBanner, Toast } from "../../components/feedback.jsx";
 
@@ -56,18 +65,52 @@ function ApplyChallenge() {
     let mounted = true;
     (async () => {
       try {
-        const [c, profile, draft] = await Promise.all([
-          getChallengeById(id),
-          getProfile(user?.id),
-          user?.id ? getDraft(user.id, id) : Promise.resolve(null),
+        let c = null;
+        let profile = null;
+        let draft = null;
+
+        const [apiC, apiProf, apiDraft] = await Promise.all([
+          fetchChallengeById(id),
+          user?.id ? fetchMyProfile().catch(() => null) : Promise.resolve(null),
+          user?.id ? apiFetchDraft(id).catch(() => null) : Promise.resolve(null),
         ]);
+
+        if (!apiC) {
+          if (canUseDemoFallback("challenge load", "backend challenge lookup failed")) {
+            c = await getChallengeById(id);
+          } else {
+            throw new Error("Challenge could not be loaded from the backend.", { cause: apiC });
+          }
+        } else {
+          c = apiC;
+        }
+
+        if (apiProf?.profile) {
+          profile = apiProf.profile;
+        } else if (user?.id && !canUseDemoFallback("profile load", "backend profile lookup failed")) {
+          profile = null;
+        } else if (user?.id && !profile) {
+          profile = await getProfile(user.id);
+        }
+
+        if (apiDraft) {
+          draft = apiDraft;
+        } else if (user?.id) {
+          const canLoadLocalDraft = canUseDemoFallback("draft load", "backend draft lookup failed");
+          if (canLoadLocalDraft) {
+            const localDraft = await getDraft(user.id, id).catch(() => null);
+            draft = localDraft;
+          }
+        }
+
         if (!mounted) return;
+
         setChallenge(c);
         const base = {
           ...EMPTY_FORM,
-          startupName: profile.startupName || user?.startupName || "",
-          contactPerson: profile.founderName || "",
-          technology: profile.technology || profile.techTags || "",
+          startupName: profile?.startupName || user?.startupName || "",
+          contactPerson: profile?.founderName || "",
+          technology: profile?.technology || profile?.techTags || "",
         };
         if (draft?.data?.formData) {
           const saved = draft.data.formData;
@@ -102,11 +145,26 @@ function ApplyChallenge() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
-        const saved = await saveDraft(user.id, id, {
-          formData,
-          documentName: document ? document.name : draftName,
-        });
-        setDraftAt(saved.updatedAt);
+        let saved = null;
+        try {
+          saved = await apiSaveDraft(id, {
+            formData,
+            documentName: document ? document.name : draftName,
+          });
+        } catch (saveErr) {
+          if (canUseDemoFallback("draft save", saveErr)) {
+            saved = await saveDraft(user.id, id, {
+              formData,
+              documentName: document ? document.name : draftName,
+            });
+          } else {
+            setError("Draft could not be saved. Please retry when the backend is available.");
+            return;
+          }
+        }
+        if (saved?.updatedAt) {
+          setDraftAt(saved.updatedAt);
+        }
       } catch {
         // Draft saving is best-effort; submission is the source of truth.
       }
@@ -184,13 +242,44 @@ function ApplyChallenge() {
     }
     setSubmitting(true);
     try {
-      const uploaded = await mockUploadDocument(user?.id, document);
-      const record = await submitApplication({
-        userId: user?.id,
-        challenge,
-        ...formData,
-        document: uploaded,
-      });
+      let uploaded = null;
+      if (document) {
+        try {
+          uploaded = await apiUploadDocument(document);
+        } catch (uploadErr) {
+          if (canUseDemoFallback("document upload", uploadErr)) {
+            uploaded = await mockUploadDocument(user?.id, document);
+          } else {
+            throw new Error("Document upload failed. Please try again.", { cause: uploadErr });
+          }
+        }
+      }
+
+      let record = null;
+      try {
+        record = await apiSubmitApplication({
+          challengeId: id,
+          challenge,
+          ...formData,
+          document: uploaded,
+        });
+      } catch (apiErr) {
+        // If API explicitly rejects due to duplicates or validation, show error
+        if (apiErr.response?.data?.message) {
+          throw new Error(apiErr.response.data.message, { cause: apiErr });
+        }
+        if (canUseDemoFallback("application submission", apiErr)) {
+          record = await submitApplication({
+            userId: user?.id,
+            challenge,
+            ...formData,
+            document: uploaded,
+          });
+        } else {
+          throw new Error("The backend rejected this application. Please review the form and try again.", { cause: apiErr });
+        }
+      }
+
       setDraftAt(null);
       setSubmitted(record);
       window.scrollTo({ top: 0 });

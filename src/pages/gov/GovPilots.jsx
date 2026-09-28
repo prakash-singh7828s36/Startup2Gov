@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   getPilots,
   toggleMilestone,
@@ -15,26 +15,21 @@ import {
 } from 'recharts';
 import {
   CheckCircle,
-  Clock,
   AlertTriangle,
   TrendingUp,
   DollarSign,
-  ArrowUpRight,
   ShieldCheck,
   CreditCard,
   X
 } from 'lucide-react';
 
 export default function GovPilots() {
-  const [pilots, setPilots] = useState([]);
-  const [activePilotId, setActivePilotId] = useState('');
-  const [paymentModal, setPaymentModal] = useState(null);
-
-  useEffect(() => {
+  const [pilots, setPilots] = useState(() => getPilots());
+  const [activePilotId, setActivePilotId] = useState(() => {
     const loaded = getPilots();
-    setPilots(loaded);
-    if (loaded.length > 0) setActivePilotId(loaded[0].id);
-  }, []);
+    return loaded.length > 0 ? loaded[0].id : '';
+  });
+  const [paymentModal, setPaymentModal] = useState(null);
 
   const activePilot = pilots.find((p) => p.id === activePilotId) || pilots[0];
 

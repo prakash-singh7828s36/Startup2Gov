@@ -1,0 +1,8 @@
+{
+  "name": "Startup2Gov",
+  "description": "Startup2Gov platform connecting startups with government challenges and procurement pilots.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

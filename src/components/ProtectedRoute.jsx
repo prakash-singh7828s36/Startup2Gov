@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { dashboardForRole } from "../services/authService.js";
+import { dashboardForRole } from "../api/authApi.js";
 
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();

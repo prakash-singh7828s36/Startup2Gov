@@ -9,7 +9,13 @@ import {
   getGovChallengeById,
   updateChallenge,
 } from "../../services/govChallengeService.js";
+import {
+  createGovChallenge,
+  updateGovChallenge,
+  fetchChallengeById,
+} from "../../api/challengeApi.js";
 import { Loading, ErrorBanner } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 const CATEGORIES = challengeCategories.filter((c) => c !== "All");
 
@@ -57,8 +63,21 @@ function ChallengeForm() {
     (async () => {
       setLoading(true);
       try {
-        const c = await getGovChallengeById(id);
-        if (!c) throw new Error("Challenge not found");
+        let c = null;
+        try {
+          c = await fetchChallengeById(id);
+        } catch (apiErr) {
+          if (!canUseDemoFallback("gov challenge load", apiErr)) {
+            throw new Error("Challenge details could not be loaded from the backend.", { cause: apiErr });
+          }
+          c = await getGovChallengeById(id);
+        }
+        if (!c) {
+          if (canUseDemoFallback("gov challenge load fallback", "backend challenge lookup failed")) {
+            c = await getGovChallengeById(id);
+          }
+          if (!c) throw new Error("Challenge not found");
+        }
         setForm({
           title: c.title || "",
           department: c.department || "",
@@ -94,37 +113,45 @@ function ChallengeForm() {
       return;
     }
     setSaving(true);
+
+    const payload = {
+      title: form.title,
+      department: form.department,
+      category: form.category,
+      location: form.location,
+      budget: form.budget,
+      duration: form.duration,
+      deadlineInput: form.deadlineInput,
+      deadlineDate: form.deadlineInput,
+      description: form.description,
+      requirements: form.requirements,
+      tags: form.tags,
+      eligibilityNote: form.eligibilityNote,
+    };
+
     try {
       if (isEdit) {
-        await updateChallenge(id, user?.id, {
-          title: form.title,
-          department: form.department,
-          category: form.category,
-          location: form.location,
-          budget: form.budget,
-          duration: form.duration,
-          deadlineInput: form.deadlineInput,
-          description: form.description,
-          requirements: form.requirements,
-          tags: form.tags,
-          eligibilityNote: form.eligibilityNote,
-        });
+        try {
+          await updateGovChallenge(id, payload);
+        } catch (apiErr) {
+          if (!canUseDemoFallback("gov challenge update", apiErr)) {
+            throw new Error("Challenge update could not be saved in the backend.", { cause: apiErr });
+          }
+          await updateChallenge(id, user?.id, payload);
+        }
       } else {
-        await createChallenge({
-          govUserId: user?.id,
-          govDisplayName: user?.displayName,
-          title: form.title,
-          department: form.department,
-          category: form.category,
-          location: form.location,
-          budget: form.budget,
-          duration: form.duration,
-          deadlineInput: form.deadlineInput,
-          description: form.description,
-          requirements: form.requirements,
-          tags: form.tags,
-          eligibilityNote: form.eligibilityNote,
-        });
+        try {
+          await createGovChallenge(payload);
+        } catch (apiErr) {
+          if (!canUseDemoFallback("gov challenge create", apiErr)) {
+            throw new Error("Challenge could not be published to the backend.", { cause: apiErr });
+          }
+          await createChallenge({
+            govUserId: user?.id,
+            govDisplayName: user?.displayName,
+            ...payload,
+          });
+        }
       }
       navigate("/gov/challenges");
     } catch (err) {

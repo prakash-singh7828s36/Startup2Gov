@@ -17,11 +17,14 @@ import {
 import { useAuth } from "../../context/AuthContext.jsx";
 import { getChallenges } from "../../services/challengeService.js";
 import { getProfile } from "../../services/startupService.js";
+import { fetchChallenges } from "../../api/challengeApi.js";
+import { fetchMyProfile } from "../../api/profileApi.js";
 import { rankChallenges, checkEligibility } from "../../services/matching.js";
 import { deadlineBadge } from "../../services/deadlines.js";
 import { getBookmarks, toggleBookmark } from "../../services/bookmarks.js";
 import { challengeCategories } from "../../data/challenges.js";
 import { ErrorBanner } from "../../components/feedback.jsx";
+import { canUseDemoFallback } from "../../services/demoMode.js";
 
 const SORTS = [
   { id: "match", label: "Best match" },
@@ -62,13 +65,34 @@ function BrowseChallenges() {
     setLoading(true);
     setError("");
     try {
-      const [list, prof, marks] = await Promise.all([
-        getChallenges(),
-        getProfile(user?.id),
+      let list = null;
+      let prof = null;
+
+      try {
+        const [resList, resProf] = await Promise.all([
+          fetchChallenges(),
+          user?.id ? fetchMyProfile().catch(() => null) : Promise.resolve(null),
+        ]);
+        if (resList?.challenges?.length) {
+          list = resList.challenges;
+        }
+        if (resProf?.profile) {
+          prof = resProf.profile;
+        }
+      } catch (apiErr) {
+        if (!canUseDemoFallback("challenge browse", apiErr)) {
+          throw new Error("Unable to load challenges from the backend. Please try again later.", { cause: apiErr });
+        }
+      }
+
+      const [fallbackList, fallbackProf, marks] = await Promise.all([
+        list ? Promise.resolve(list) : (canUseDemoFallback("challenge browse fallback", "backend challenge lookup failed") ? getChallenges() : []),
+        prof ? Promise.resolve(prof) : (user?.id && canUseDemoFallback("profile load fallback", "backend profile lookup failed") ? getProfile(user?.id) : null),
         getBookmarks(user?.id),
       ]);
-      setChallenges(list);
-      setProfile(prof);
+
+      setChallenges(fallbackList);
+      setProfile(fallbackProf);
       setSaved(marks);
     } catch (e) {
       setError(e.message || "Failed to load challenges.");

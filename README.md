@@ -124,7 +124,9 @@ defaults to `/dashboard`.
 
 ## 60-second judge script
 
-1. Land on `/` → **Get started** → sign up (`demo@startup.in` / `password123`).
+For a local, non-production demo, set `VITE_DEMO_MODE=true`; demo accounts are disabled otherwise.
+
+1. Land on `/` → **Sign in** (`demo@startup.in` / `password123`).
 2. Sidebar → **Judge demo** → dashboard hero, recommended rail, funnel, activity.
 3. **Browse**: sort *Best match*, toggle *Eligible for me*, bookmark one, select two →
    **Compare**.
@@ -132,8 +134,103 @@ defaults to `/dashboard`.
 5. **Apply** (challenge 7): wizard + autosave → review → submit → calendar download.
 6. **My Applications** → **Details** drawer → export. Sidebar → **Reset**.
 
-## Future Supabase swap
+## Architecture & Stack
 
-Create `src/lib/supabase.js` + `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`),
-then replace service internals with table calls (`startups`, `challenges`,
-`applications`, storage bucket) keeping the same function names. Routes stay unchanged.
+- **Frontend**: React 19, Vite 8, React Router v7, Recharts, Lucide Icons, Axios
+- **Backend (server/)**: Node.js, Express.js, MongoDB Atlas (Mongoose), bcryptjs, jsonwebtoken (JWT)
+- **Security**: Server-side role enforcement (RBAC), Helmet HTTP headers, CORS origin whitelist, Express rate-limiting, bcrypt salt rounds >= 10, JWT Bearer tokens
+- **Persistence**: MongoDB Atlas with Mongoose models (`User`), and fallback health monitoring
+
+## Quick Start & Running Locally
+
+### 1. Frontend Setup (Port 3000)
+```bash
+npm install
+npm run dev        # http://localhost:3000 (proxies /api -> http://localhost:5000)
+npm run build      # Production bundle
+npm run lint       # ESLint verification
+```
+
+### 2. Backend Setup (Port 5000)
+```bash
+cd server
+cp .env.example .env   # Configure MONGODB_URI and JWT_SECRET
+npm install
+npm run dev            # Starts backend on http://localhost:5000 with auto-reload
+npm test               # Runs automated test suite (17 tests)
+npm run seed           # Seeds standard demo accounts into MongoDB
+```
+
+## Backend API Endpoints
+
+### Authentication (Phase 1)
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/health` | Public | Service health and MongoDB connection status |
+| `POST` | `/api/auth/signup` | Public (Rate-limited) | Register new `startup` or `government` user |
+| `POST` | `/api/auth/login` | Public (Rate-limited) | Authenticate user, verify bcrypt hash, return JWT |
+| `GET` | `/api/auth/me` | Authenticated (JWT) | Get current verified user profile from token |
+| `POST` | `/api/auth/logout` | Public | Clear session / client token invalidation |
+| `GET` | `/api/auth/role-check/government` | Role: `government`, `admin` | Verification endpoint for RBAC |
+| `GET` | `/api/auth/role-check/startup` | Role: `startup` | Verification endpoint for RBAC |
+
+### Challenge Management (Phase 2)
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/challenges` | Public / Opt-Auth | List published challenges with pagination, search, category filter, and personalized match score |
+| `GET` | `/api/challenges/owned` | Role: `government`, `admin` | Get all challenges created by the logged-in department |
+| `GET` | `/api/challenges/:id` | Public / Opt-Auth | Get challenge details by ObjectId, customId, or slug (Drafts restricted to owner) |
+| `POST` | `/api/challenges` | Role: `government`, `admin` | Create a new challenge owned by the authenticated government user |
+| `PUT` | `/api/challenges/:id` | Role: `government`, `admin` | Update owned challenge details (enforces ownership and writable field limits) |
+| `PATCH` | `/api/challenges/:id/status` | Role: `government`, `admin` | Set challenge status (`Open`, `Closed`, `Draft`) |
+| `DELETE` | `/api/challenges/:id` | Role: `government`, `admin` | Delete owned challenge (demo challenges protected) |
+
+### Startup Profile (Phase 2)
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/profile/me` | Role: `startup`, `admin` | Get authenticated startup's profile with completion & strength scores |
+| `PUT` | `/api/profile/me` | Role: `startup`, `admin` | Upsert startup's profile (validates 15 fields including DPIIT, team size, URLs) |
+
+### Applications & Drafts (Phase 3)
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/applications/drafts/:challengeId` | Role: `startup`, `admin` | Retrieve autosaved draft for the challenge |
+| `POST` | `/api/applications/drafts/:challengeId` | Role: `startup`, `admin` | Debounced autosave of proposal form and document metadata |
+| `DELETE` | `/api/applications/drafts/:challengeId` | Role: `startup`, `admin` | Clear saved draft |
+| `GET` | `/api/applications/my` | Role: `startup`, `admin` | List all applications submitted by current startup |
+| `GET` | `/api/applications/:id` | Authenticated | View application details (enforces ownership and access permissions) |
+| `POST` | `/api/applications` | Role: `startup`, `admin` | Submit final proposal (validates required fields, deadline, and rejects duplicate active submissions) |
+| `DELETE` | `/api/applications/:id` | Role: `startup`, `admin` | Withdraw submitted application (cannot withdraw approved applications) |
+| `GET` | `/api/applications/gov/inbox` | Role: `government`, `admin` | Department inbox for applications to owned challenges with queue stats |
+| `PATCH` | `/api/applications/:id/review` | Role: `government`, `admin` | Submit review decision (`Approved`, `Rejected`, `Under Review`) with audit trail |
+
+### Secure Document Storage (Phase 3)
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/documents/upload` | Authenticated | Securely upload proposal PDF/Word doc (5MB limit, sanitized UUID storage key) |
+| `GET` | `/api/documents/:storageKey` | Authenticated | Private authorized download (applicant, owning department officer, or admin only) |
+
+
+## Transparent Matching & Scoring Formula (100 Points Total)
+
+Both server (`server/services/matchingService.js`) and client (`src/services/matching.js`) use the exact same transparent evaluation breakdown:
+1. **Industry Fit (30 pts)**: Exact match = 30 pts, Related tech field = 22 pts, Cross-domain = 6 pts.
+2. **Keyword Overlap (30 pts)**: Proportional match between profile tags/description and challenge keywords (up to 5 keywords).
+3. **Profile Strength & Completeness (20 pts)**: Calculated from the percentage completion of core and extended profile fields.
+4. **Startup Stage Fit (10 pts)**: Current stage matches challenge eligibility requirements = 10 pts, Idea/Early stage = 4 pts.
+5. **Team Size Readiness (10 pts)**: Team size meets challenge threshold (`minTeam`) = 10 pts, partial team = 5 pts.
+
+## Idempotent Demo Seeding Scripts
+
+Run the following commands from `server/`:
+- Set `SEED_DEMO_USERS=true` and run `npm run seed` only in non-production to create standard demo users (`demo@startup.in`, `demo@gov.in`). The script refuses to seed these credentials in production.
+- `node scripts/seedChallenges.js`: Seeds or updates the 12 canonical SIH demo challenges with `isDemo: true`, without overwriting any user-created challenges.
+
+
+## Environment Configuration
+
+- Root `.env.example`: frontend configuration (`VITE_API_URL=/api`)
+- `server/.env.example`: backend configuration (`PORT`, `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL`)
+- All `.env` and `.env.*` files are explicitly ignored by `.gitignore`.
+
+## Services (`src/services/`)

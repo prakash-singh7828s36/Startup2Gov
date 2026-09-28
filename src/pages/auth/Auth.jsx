@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { User, Mail, Lock, Landmark, Sun, Moon, ArrowRight, Building2, Briefcase } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useTheme } from "../../context/ThemeContext.jsx";
-import { dashboardForRole } from "../../services/authService.js";
+import { dashboardForRole } from "../../api/authApi.js";
+import { DEMO_MODE } from "../../services/demoMode.js";
 
 function AuthForm({ mode }) {
   const isLogin = mode === "login";
@@ -236,9 +237,10 @@ function AuthForm({ mode }) {
       </div>
 
       <p className="auth-demo">
-        <Link to="/">← Back to home</Link> · Demo startup: demo@startup.in /
-        password123 · Demo govt: demo@gov.in / password123 · mock auth, data
-        stays in this browser
+        <Link to="/">← Back to home</Link>
+        {DEMO_MODE && (
+          <> · Demo startup: demo@startup.in / password123 · Demo govt: demo@gov.in / password123 · mock auth, data stays in this browser</>
+        )}
       </p>
     </div>
   );
